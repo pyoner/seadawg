@@ -2,6 +2,21 @@ import { SeaSinkNode } from "./data";
 
 const EDGE_OPEN = -2;
 
+enum TraversalMode {
+  Traversal,
+  Collection,
+  Sink,
+}
+
+interface TraversalContext {
+  mode: TraversalMode,
+  node: SeaNode,
+  edgesToScan: Array<SeaEdge>;
+  traversedWord: string,
+  wordIdx: number,
+  result: Array<[string, SeaSinkNode]>,
+}
+
 export class SeaEdge {
   constructor(
     public partial: string,
@@ -141,6 +156,123 @@ export class SeaDawgCore {
     }
 
     return targetNode;
+  }
+
+  public findWithPrefix(word: string): Array<[string, SeaSinkNode]> {
+
+    const result: Array<[string, SeaSinkNode]> = [];
+
+    const context: TraversalContext = {
+      "mode": TraversalMode.Traversal,
+      "node": this.source,
+      "wordIdx": 0,
+      edgesToScan: [],
+      "traversedWord": "",
+      result,
+    };
+
+    this._executeTraversal(
+      new PrefixTraverser(word),
+      context,
+    );
+
+    return result;
+  }
+
+  //TODO: Not finished
+  private findWithSubstring(word: string): Array<[string, SeaSinkNode]> {
+
+    const result: Array<[string, SeaSinkNode]> = [];
+
+    const context: TraversalContext = {
+      "mode": TraversalMode.Traversal,
+      "node": this.source,
+      "wordIdx": 0,
+      edgesToScan: [],
+      "traversedWord": "",
+      result,
+    };
+
+    this._executeTraversal(
+      new ContainsTraverser(word),
+      context,
+    );
+
+    return result;
+  }
+
+  private _executeTraversal(
+    traverser: Traverser,
+    baseContext: TraversalContext,
+  ): Array<[string, SeaSinkNode]> {
+
+    // Initialize
+    traverser.edgeSelector(baseContext, baseContext.edgesToScan);
+    const result = baseContext.result;
+    const traversalContexts: Array<TraversalContext> = [baseContext];
+
+    while(traversalContexts.length > 0) {
+      const traversalContext = traversalContexts.pop();
+
+      const shouldTraverse = traversalContext.edgesToScan.length > 0;
+      if(!shouldTraverse) {
+        continue;
+      }
+
+      traversalContexts.push(traversalContext); // Keep it active
+      const edge = traversalContext.edgesToScan.pop();
+
+      if (traversalContext.mode === TraversalMode.Traversal) {
+
+        if (!traverser.shouldAcceptEdge(edge, traversalContext, traversalContexts)) {
+          continue;
+        }
+
+        if (edge.dest instanceof SeaNode) {
+
+          if (edge.dest.toEdges.size <= 0) {
+            continue;
+          }
+
+          const edges = [];
+          traverser.edgeSelector(traversalContext, edges);
+
+          const newContext: TraversalContext = {
+            "mode": TraversalMode.Traversal,
+            "node": edge.dest,
+            "wordIdx": traversalContext.wordIdx + edge.partial.length,
+            "traversedWord": traversalContext.traversedWord + edge.partial,
+            "edgesToScan": edges,
+            result,
+          };
+
+          traversalContexts.push(newContext);
+        } else {
+
+          const newTraversalContext: TraversalContext = {
+            "mode": TraversalMode.Sink,
+            "node": null,
+            "result": traversalContext.result,
+            "wordIdx": traversalContext.wordIdx,
+            "traversedWord": traversalContext.traversedWord,
+            "edgesToScan": [edge],
+          };
+          traversalContexts.push(newTraversalContext);
+        }
+      } else if (traversalContext.mode === TraversalMode.Collection) {
+        
+        traverser.collect(edge, traversalContext, traversalContexts);
+
+      } else if (traversalContext.mode === TraversalMode.Sink) {
+
+        const traversedWord = this.removeTerminator(traversalContext.traversedWord);
+        if (traverser.shouldAcceptSinkNode(edge, traversalContext.wordIdx, traversedWord)) {
+          result.push([traversedWord, edge.dest]);
+        }
+      }
+    }
+
+    return result;
   }
 
   private _update(word: string, letter: string, updateNode: SeaNode, startIdx: number, endIdx: number): [SeaNode, number] {
@@ -331,6 +463,10 @@ export class SeaDawgCore {
   private _terminateWord(word: string): string {
     return word + this.wordTerminator;
   }
+
+  private removeTerminator(word:string): string {
+    return word.endsWith(this.wordTerminator) ? word.substring(0, word.length - 1) : word;
+  }
 }
 
 /**
@@ -341,4 +477,215 @@ export class SeaDawgCore {
 function getEndIdx(edge: SeaEdge): number {
   
   return edge.endIdx === EDGE_OPEN ? edge.dest.length : edge.endIdx; // This is e(i) as citied in the paper
+}
+
+interface Traverser {
+  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]);
+  edgeSelector(ontext: TraversalContext, edges: Array<SeaEdge>);
+  shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, secondaryTraversalContexts: Array<TraversalContext>): boolean;
+  shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, word: string);
+}
+
+class PrefixTraverser implements Traverser {
+  
+  constructor(
+    private _prefixWord: string,
+  ) {}
+
+
+  
+  edgeSelector(context: TraversalContext, edges: Array<SeaEdge>) {
+    
+    const wordIdx = context.wordIdx;
+    const node = context.node;
+
+    const wordFirstChar = this._prefixWord[wordIdx];
+    const matchingEdge = node.toEdges.get(wordFirstChar);
+
+    if(!matchingEdge) {
+      return;
+    }
+
+    edges.push(matchingEdge);
+  }
+
+  shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, traversalContexts: Array<TraversalContext>): boolean {
+    
+    const wordIdx = context.wordIdx;
+    const word =  this._prefixWord;
+    const partialLength = matchingEdge.partial.length;
+    const wordLengthRemaining = word.length - wordIdx;
+    
+    if (wordLengthRemaining > partialLength) {
+      return false
+    }
+
+    const wordSubstring = word.substring(wordIdx, wordIdx + partialLength);
+
+    if(
+      partialLength > wordLengthRemaining && 
+      matchingEdge.partial.substring(0, partialLength - word.length) === wordSubstring
+    ) {
+      
+      const traversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": null,
+        "result": context.result,
+        "wordIdx": wordIdx,
+        "traversedWord": context.traversedWord,
+        "edgesToScan": [matchingEdge],
+      }
+      traversalContexts.push(traversalContext);
+
+    } else if(partialLength === wordLengthRemaining && matchingEdge.partial === wordSubstring) {
+      
+      if (matchingEdge.dest instanceof SeaNode && (wordIdx + partialLength) < word.length) {
+
+        return true;
+      }
+
+      const traversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": null,
+        "result": context.result,
+        "wordIdx": wordIdx,
+        "traversedWord": context.traversedWord,
+        "edgesToScan": [matchingEdge],
+      };
+      traversalContexts.push(traversalContext);
+    }
+
+    return false;
+  }
+
+  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]) {
+
+    const node = edge.dest;
+
+    if(node instanceof SeaNode) {
+
+      const newTraversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": node,
+        "result": traversalContext.result,
+        "wordIdx": traversalContext.wordIdx,
+        "traversedWord": traversalContext.traversedWord + edge.partial,
+        "edgesToScan": Array.from(node.toEdges.values()),
+      };
+      traversalContexts.push(newTraversalContext);
+
+      return;
+    }
+
+    const newTraversalContext: TraversalContext = {
+      "mode": TraversalMode.Sink,
+      "node": null,
+      "result": traversalContext.result,
+      "wordIdx": traversalContext.wordIdx,
+      "traversedWord": traversalContext.traversedWord + edge.partial,
+      "edgesToScan": [edge],
+    };
+    traversalContexts.push(newTraversalContext);
+  }
+
+  shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, finalWord: string) {
+    return finalWord.length === sinkEdge.dest.length - 1;
+  }
+}
+
+class ContainsTraverser implements Traverser {
+  
+  constructor(
+    private _substringWord: string,
+  ) {}
+  
+  edgeSelector(context: TraversalContext, edges: Array<SeaEdge>) {
+    
+    const node = context.node;
+
+    edges.push(...node.toEdges.values());
+  }
+
+  shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, traversalContexts: Array<TraversalContext>): boolean {
+    
+    const wordIdx = context.wordIdx;
+    const word =  this._substringWord;
+    const partialLength = matchingEdge.partial.length;
+    const wordLengthRemaining = word.length - wordIdx;
+    
+    if (wordLengthRemaining > partialLength) {
+      return false
+    }
+
+    const wordSubstring = word.substring(wordIdx, wordIdx + partialLength);
+
+    if(
+      partialLength > wordLengthRemaining && 
+      matchingEdge.partial.substring(0, partialLength - word.length) === wordSubstring
+    ) {
+      
+      const traversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": null,
+        "result": context.result,
+        "wordIdx": wordIdx,
+        "traversedWord": context.traversedWord,
+        "edgesToScan": [matchingEdge],
+      }
+      traversalContexts.push(traversalContext);
+
+    } else if(partialLength === wordLengthRemaining && matchingEdge.partial === wordSubstring) {
+      
+      if (matchingEdge.dest instanceof SeaNode && (wordIdx + partialLength) < word.length) {
+
+        return true;
+      }
+
+      const traversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": null,
+        "result": context.result,
+        "wordIdx": wordIdx,
+        "traversedWord": context.traversedWord,
+        "edgesToScan": [matchingEdge],
+      };
+      traversalContexts.push(traversalContext);
+    }
+
+    return false;
+  }
+
+  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]) {
+
+    const node = edge.dest;
+
+    if(node instanceof SeaNode) {
+
+      const newTraversalContext: TraversalContext = {
+        "mode": TraversalMode.Collection,
+        "node": node,
+        "result": traversalContext.result,
+        "wordIdx": traversalContext.wordIdx,
+        "traversedWord": traversalContext.traversedWord + edge.partial,
+        "edgesToScan": Array.from(node.toEdges.values()),
+      };
+      traversalContexts.push(newTraversalContext);
+
+      return;
+    }
+
+    const newTraversalContext: TraversalContext = {
+      "mode": TraversalMode.Sink,
+      "node": null,
+      "result": traversalContext.result,
+      "wordIdx": traversalContext.wordIdx,
+      "traversedWord": traversalContext.traversedWord + edge.partial,
+      "edgesToScan": [edge],
+    };
+    traversalContexts.push(newTraversalContext);
+  }
+
+  shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, finalWord: string) {
+    return finalWord.length === sinkEdge.dest.length - 1;
+  }
 }
