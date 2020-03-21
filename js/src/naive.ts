@@ -136,7 +136,11 @@ export class SeaDawgCore<V> {
       if(edgeWord.substring(matchingEdge.startIdx, matchingEdge.endIdx + 1) === word.substring(wordIdx, wordIdx + partialLength)) {
 
         if (!(matchingEdge.dest instanceof SeaNode)) {
-          targetNode = matchingEdge.dest;
+          
+          if (matchingEdge.dest.length === word.length) {
+            targetNode = matchingEdge.dest;
+          }
+          
           break;
         }
 

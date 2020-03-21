@@ -124,7 +124,10 @@ export class SeaDawgCore {
       if(matchingEdge.partial === word.substring(wordIdx, wordIdx + partialLength)) {
 
         if (!(matchingEdge.dest instanceof SeaNode)) {
-          targetNode = matchingEdge.dest;
+
+          if (matchingEdge.dest.length === word.length) {
+            targetNode = matchingEdge.dest;
+          }
           break;
         }
 

@@ -49,6 +49,8 @@ function main() {
   if(!sinkNode || sinkNode.data !== "GG") {
     console.error(`Did not find matching data for  "${chosenWord}"'!`);
   }
+
+  console.log(seaDawg.findExact("a"));
 }
 
 main();
