@@ -33,6 +33,7 @@ async function main() {
           charset: "alphanumeric",
         });
         
+        words.push(words);
         seaDawg.add(word, new SeaDefaultSinkNode());
       }
     } catch (err) {
