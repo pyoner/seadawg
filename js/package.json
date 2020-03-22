@@ -16,6 +16,8 @@
     "example:map": "ts-node examples/map.ts"
   },
   "dependencies": {
+    "cbor-js": "^0.1.0",
+    "cuckoo-filter": "^1.1.4",
     "dumpenvy": "^1.3.0",
     "klona": "^1.1.1",
     "log4js": "^6.1.0"

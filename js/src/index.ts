@@ -3,9 +3,9 @@ import { SeaValueSinkNode } from "./data";
 
 export class SeaDawgMap<Value> implements Map<string, Value> {
 
-  [Symbol.toStringTag]: string;
   private _core: SeaDawgCore;
 
+  [Symbol.toStringTag]: string;
   size: number = 0;
 
   constructor() {

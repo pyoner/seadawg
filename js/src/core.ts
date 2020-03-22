@@ -1,3 +1,5 @@
+import { ScalableCuckooFilter } from "cuckoo-filter";
+
 import { SeaSinkNode } from "./data";
 
 const EDGE_OPEN = -2;
@@ -17,23 +19,26 @@ interface TraversalContext {
   result: Array<[string, SeaSinkNode]>,
 }
 
+interface PrefixContext extends TraversalContext {}
+
+interface FindSuperStringContext extends TraversalContext {
+  sinkEdge: SeaEdge;
+}
+
 export class SeaEdge {
   constructor(
+    public src: SeaNode,
     public partial: string,
     public startIdx: number,
     public endIdx: number,
     public dest: SeaNode | SeaSinkNode,
   ) {}
-
-  clone(): SeaEdge {
-    
-    return new SeaEdge(this.partial, this.startIdx, this.endIdx, this.dest);
-  }
 }
 
 export class SeaNode {
 
   public toEdges: Map<string, SeaEdge>;
+  public incomingEdges: Set<SeaEdge>;
 
   constructor(
     public length: number,
@@ -41,11 +46,30 @@ export class SeaNode {
   ) {
 
     this.toEdges = new Map();
+    this.incomingEdges = new Set();
   }
 
   setEdge(partial: string, letter: string, startIdx: number, endIdx: number, dest: SeaNode | SeaSinkNode) {
+    
+    const existingEdge = this.toEdges.get(letter);
 
-    this.toEdges.set(letter, new SeaEdge(partial, startIdx, endIdx, dest));
+    if(existingEdge) {
+      if(existingEdge.dest !== dest) {
+
+        existingEdge.dest.incomingEdges.delete(existingEdge);
+
+        existingEdge.partial = partial;
+        existingEdge.startIdx = startIdx;
+        existingEdge.endIdx = endIdx;
+        dest.incomingEdges.add(existingEdge);
+        existingEdge.dest = dest;
+      }
+    } else {
+
+      const edge = new SeaEdge(this, partial, startIdx, endIdx, dest);
+      this.toEdges.set(letter, edge);
+      dest.incomingEdges.add(edge);
+    }
   }
 
   clone(): SeaNode {
@@ -53,8 +77,7 @@ export class SeaNode {
     const cloneNode = new SeaNode(this.length, this.suffix);
 
     for (let [key, edge] of this.toEdges.entries()) {
-      const clonedEdge = edge.clone();
-      cloneNode.toEdges.set(key, clonedEdge);
+      cloneNode.setEdge(edge.partial, key, edge.startIdx, edge.endIdx, edge.dest);
     }
 
     return cloneNode;
@@ -162,7 +185,7 @@ export class SeaDawgCore {
 
     const result: Array<[string, SeaSinkNode]> = [];
 
-    const context: TraversalContext = {
+    const context: PrefixContext = {
       "mode": TraversalMode.Traversal,
       "node": this.source,
       "wordIdx": 0,
@@ -179,22 +202,22 @@ export class SeaDawgCore {
     return result;
   }
 
-  //TODO: Not finished
-  private findWithSubstring(word: string): Array<[string, SeaSinkNode]> {
+  public findWithSubstring(word: string): Array<[string, SeaSinkNode]> {
 
     const result: Array<[string, SeaSinkNode]> = [];
 
-    const context: TraversalContext = {
+    const context: FindSuperStringContext = {
       "mode": TraversalMode.Traversal,
       "node": this.source,
       "wordIdx": 0,
-      edgesToScan: [],
+      "edgesToScan": [],
       "traversedWord": "",
       result,
+      "sinkEdge": null,
     };
 
     this._executeTraversal(
-      new ContainsTraverser(word),
+      new FindSuperStringTraverser(word),
       context,
     );
 
@@ -204,12 +227,12 @@ export class SeaDawgCore {
   private _executeTraversal(
     traverser: Traverser,
     baseContext: TraversalContext,
-  ): Array<[string, SeaSinkNode]> {
+  ) {
 
     // Initialize
-    traverser.edgeSelector(baseContext, baseContext.edgesToScan);
     const result = baseContext.result;
     const traversalContexts: Array<TraversalContext> = [baseContext];
+    traverser.selectEdges(baseContext, traversalContexts);
 
     while(traversalContexts.length > 0) {
       const traversalContext = traversalContexts.pop();
@@ -234,31 +257,12 @@ export class SeaDawgCore {
             continue;
           }
 
-          const edges = [];
-          traverser.edgeSelector(traversalContext, edges);
-
-          const newContext: TraversalContext = {
-            "mode": TraversalMode.Traversal,
-            "node": edge.dest,
-            "wordIdx": traversalContext.wordIdx + edge.partial.length,
-            "traversedWord": traversalContext.traversedWord + edge.partial,
-            "edgesToScan": edges,
-            result,
-          };
-
-          traversalContexts.push(newContext);
+          traverser.selectEdges(traversalContext, traversalContexts);
         } else {
 
-          const newTraversalContext: TraversalContext = {
-            "mode": TraversalMode.Sink,
-            "node": null,
-            "result": traversalContext.result,
-            "wordIdx": traversalContext.wordIdx,
-            "traversedWord": traversalContext.traversedWord,
-            "edgesToScan": [edge],
-          };
-          traversalContexts.push(newTraversalContext);
+          traverser.collect(edge, traversalContext, traversalContexts);
         }
+
       } else if (traversalContext.mode === TraversalMode.Collection) {
         
         traverser.collect(edge, traversalContext, traversalContexts);
@@ -266,13 +270,12 @@ export class SeaDawgCore {
       } else if (traversalContext.mode === TraversalMode.Sink) {
 
         const traversedWord = this.removeTerminator(traversalContext.traversedWord);
+
         if (traverser.shouldAcceptSinkNode(edge, traversalContext.wordIdx, traversedWord)) {
           result.push([traversedWord, edge.dest]);
         }
       }
     }
-
-    return result;
   }
 
   private _update(word: string, letter: string, updateNode: SeaNode, startIdx: number, endIdx: number): [SeaNode, number] {
@@ -480,9 +483,16 @@ function getEndIdx(edge: SeaEdge): number {
 }
 
 interface Traverser {
-  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]);
-  edgeSelector(ontext: TraversalContext, edges: Array<SeaEdge>);
+  // Initial selection of edges
+  selectEdges(ontext: TraversalContext, traversalContexts: Array<TraversalContext>);
+
+  // Should specified edge go through round of edge selection
   shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, secondaryTraversalContexts: Array<TraversalContext>): boolean;
+
+  // After pruning select sink edges that will be considered
+  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]);
+
+  // Should sink node be added to the result set
   shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, word: string);
 }
 
@@ -491,12 +501,10 @@ class PrefixTraverser implements Traverser {
   constructor(
     private _prefixWord: string,
   ) {}
-
-
   
-  edgeSelector(context: TraversalContext, edges: Array<SeaEdge>) {
+  selectEdges(context: PrefixContext, traversalContexts: Array<TraversalContext>) {
     
-    const wordIdx = context.wordIdx;
+    let wordIdx = context.wordIdx;
     const node = context.node;
 
     const wordFirstChar = this._prefixWord[wordIdx];
@@ -506,18 +514,28 @@ class PrefixTraverser implements Traverser {
       return;
     }
 
-    edges.push(matchingEdge);
+    const proposedContext: PrefixContext = {
+      "mode": TraversalMode.Traversal,
+      "node": node,
+      wordIdx,
+      "traversedWord": context.traversedWord,
+      "edgesToScan": [matchingEdge],
+      "result": context.result,
+    };
+
+    traversalContexts.push(proposedContext);
   }
 
+  // Prunes the set
   shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, traversalContexts: Array<TraversalContext>): boolean {
     
-    const wordIdx = context.wordIdx;
+    const wordIdx = context.wordIdx + matchingEdge.partial.length;
     const word =  this._prefixWord;
     const partialLength = matchingEdge.partial.length;
     const wordLengthRemaining = word.length - wordIdx;
     
-    if (wordLengthRemaining > partialLength) {
-      return false
+    if (wordLengthRemaining < 0) {
+      return false;
     }
 
     const wordSubstring = word.substring(wordIdx, wordIdx + partialLength);
@@ -531,24 +549,19 @@ class PrefixTraverser implements Traverser {
         "mode": TraversalMode.Collection,
         "node": null,
         "result": context.result,
-        "wordIdx": wordIdx,
+        "wordIdx": context.wordIdx,
         "traversedWord": context.traversedWord,
         "edgesToScan": [matchingEdge],
       }
       traversalContexts.push(traversalContext);
 
     } else if(partialLength === wordLengthRemaining && matchingEdge.partial === wordSubstring) {
-      
-      if (matchingEdge.dest instanceof SeaNode && (wordIdx + partialLength) < word.length) {
-
-        return true;
-      }
 
       const traversalContext: TraversalContext = {
         "mode": TraversalMode.Collection,
         "node": null,
         "result": context.result,
-        "wordIdx": wordIdx,
+        "wordIdx":  context.wordIdx,
         "traversedWord": context.traversedWord,
         "edgesToScan": [matchingEdge],
       };
@@ -558,8 +571,9 @@ class PrefixTraverser implements Traverser {
     return false;
   }
 
+  // Collection process is a series of traversals to collect the full word after the initial pruning
   collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]) {
-
+    
     const node = edge.dest;
 
     if(node instanceof SeaNode) {
@@ -568,7 +582,7 @@ class PrefixTraverser implements Traverser {
         "mode": TraversalMode.Collection,
         "node": node,
         "result": traversalContext.result,
-        "wordIdx": traversalContext.wordIdx,
+        "wordIdx": traversalContext.wordIdx + edge.partial.length,
         "traversedWord": traversalContext.traversedWord + edge.partial,
         "edgesToScan": Array.from(node.toEdges.values()),
       };
@@ -588,104 +602,135 @@ class PrefixTraverser implements Traverser {
     traversalContexts.push(newTraversalContext);
   }
 
-  shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, finalWord: string) {
+  // Only accept words that match the original word - terminator
+  shouldAcceptSinkNode(sinkEdge: SeaEdge, _currentWordIdx: number, finalWord: string) {
     return finalWord.length === sinkEdge.dest.length - 1;
   }
 }
 
-class ContainsTraverser implements Traverser {
+/**
+ * Super strings are strings that contain a substring.
+ * In order for this to work, we need to traverse until getting to a sink node.
+ * Once we have a sink node associated with the substring, we can backtrack using
+ * the source node to reconstruct the original string.
+ */
+class FindSuperStringTraverser implements Traverser {
   
+  private _duplicateFilter : ScalableCuckooFilter;
+
   constructor(
     private _substringWord: string,
-  ) {}
+  ) {
+    this._duplicateFilter = new ScalableCuckooFilter();
+  }
   
-  edgeSelector(context: TraversalContext, edges: Array<SeaEdge>) {
-    
+  // There is only one edge ever to select
+  selectEdges(context: FindSuperStringContext, traversalContexts: Array<TraversalContext>) {
+
+    let wordIdx = context.wordIdx;
     const node = context.node;
 
-    edges.push(...node.toEdges.values());
-  }
+    const wordFirstChar = this._substringWord[wordIdx];
+    const matchingEdge = node.toEdges.get(wordFirstChar);
 
-  shouldAcceptEdge(matchingEdge: SeaEdge, context: TraversalContext, traversalContexts: Array<TraversalContext>): boolean {
-    
-    const wordIdx = context.wordIdx;
-    const word =  this._substringWord;
-    const partialLength = matchingEdge.partial.length;
-    const wordLengthRemaining = word.length - wordIdx;
-    
-    if (wordLengthRemaining > partialLength) {
-      return false
+    if(!matchingEdge) {
+      return;
     }
 
-    const wordSubstring = word.substring(wordIdx, wordIdx + partialLength);
+    const proposedContext: FindSuperStringContext = {
+      "mode": TraversalMode.Traversal,
+      "node": node,
+      wordIdx,
+      "traversedWord": context.traversedWord,
+      "edgesToScan": [matchingEdge],
+      "result": context.result,
+      "sinkEdge": context.sinkEdge,
+    };
+
+    traversalContexts.push(proposedContext);
+  }
+
+  // This function never returns true because the initial foreard edge selection process is done once
+  // since we will have a sufficient suffix. that prunes the search space.
+  // The idea is to then traverse to the sink.
+  // Once we have a sink, then initiate collection.
+  shouldAcceptEdge(matchingEdge: SeaEdge, context: FindSuperStringContext, traversalContexts: Array<TraversalContext>): boolean {
+    const wordIdx = context.wordIdx;
+    const word = this._substringWord;
+    const partialLength = matchingEdge.partial.length;
 
     if(
-      partialLength > wordLengthRemaining && 
-      matchingEdge.partial.substring(0, partialLength - word.length) === wordSubstring
+      !(matchingEdge.dest instanceof SeaNode)
     ) {
-      
-      const traversalContext: TraversalContext = {
+    
+      const nextTraversalContext: FindSuperStringContext = {
         "mode": TraversalMode.Collection,
         "node": null,
         "result": context.result,
-        "wordIdx": wordIdx,
-        "traversedWord": context.traversedWord,
-        "edgesToScan": [matchingEdge],
-      }
-      traversalContexts.push(traversalContext);
-
-    } else if(partialLength === wordLengthRemaining && matchingEdge.partial === wordSubstring) {
-      
-      if (matchingEdge.dest instanceof SeaNode && (wordIdx + partialLength) < word.length) {
-
-        return true;
-      }
-
-      const traversalContext: TraversalContext = {
-        "mode": TraversalMode.Collection,
-        "node": null,
-        "result": context.result,
-        "wordIdx": wordIdx,
-        "traversedWord": context.traversedWord,
-        "edgesToScan": [matchingEdge],
+        "wordIdx": 0,
+        "traversedWord": "",
+        "edgesToScan": Array.from(matchingEdge.dest.incomingEdges.values()),
+        "sinkEdge": matchingEdge,
       };
-      traversalContexts.push(traversalContext);
+      traversalContexts.push(nextTraversalContext);
+    } else {
+
+      const nextTraversalContext: FindSuperStringContext = {
+        "mode": TraversalMode.Traversal,
+        "node": matchingEdge.dest,
+        "wordIdx": wordIdx + partialLength,
+        "traversedWord": context.traversedWord + matchingEdge.partial,
+        "edgesToScan": Array.from(matchingEdge.dest.toEdges.values()),
+        "result": context.result,
+        "sinkEdge": context.sinkEdge,
+      };
+      traversalContexts.push(nextTraversalContext);
     }
 
     return false;
   }
 
-  collect(edge: SeaEdge, traversalContext: TraversalContext, traversalContexts: TraversalContext[]) {
+  // Collection faciliates going backward through the links and reconstructing the original strings
+  collect(edge: SeaEdge, traversalContext: FindSuperStringContext, traversalContexts: TraversalContext[]) {
 
-    const node = edge.dest;
+    const node = edge.src;
+    if(node.length > 0) {
 
-    if(node instanceof SeaNode) {
-
-      const newTraversalContext: TraversalContext = {
+      const newTraversalContext: FindSuperStringContext = {
         "mode": TraversalMode.Collection,
         "node": node,
         "result": traversalContext.result,
-        "wordIdx": traversalContext.wordIdx,
-        "traversedWord": traversalContext.traversedWord + edge.partial,
-        "edgesToScan": Array.from(node.toEdges.values()),
+        "wordIdx": 0,
+        "traversedWord": edge.partial + traversalContext.traversedWord,
+        "edgesToScan": Array.from(node.incomingEdges.values()),
+        "sinkEdge": traversalContext.sinkEdge,
       };
       traversalContexts.push(newTraversalContext);
 
       return;
     }
 
-    const newTraversalContext: TraversalContext = {
+    const newTraversalContext: FindSuperStringContext = {
       "mode": TraversalMode.Sink,
       "node": null,
       "result": traversalContext.result,
-      "wordIdx": traversalContext.wordIdx,
-      "traversedWord": traversalContext.traversedWord + edge.partial,
-      "edgesToScan": [edge],
+      "wordIdx": 0,
+      "traversedWord": edge.partial + traversalContext.traversedWord,
+      "edgesToScan": [traversalContext.sinkEdge],
+      "sinkEdge": null,
     };
     traversalContexts.push(newTraversalContext);
   }
 
+  // Only accept words that match the original word - terminator
   shouldAcceptSinkNode(sinkEdge: SeaEdge, currentWordIdx: number, finalWord: string) {
-    return finalWord.length === sinkEdge.dest.length - 1;
+    
+    if(finalWord.length === sinkEdge.dest.length - 1 && !this._duplicateFilter.contains(finalWord)) {
+
+      this._duplicateFilter.add(finalWord);
+      return true;
+    }
+
+    return false
   }
 }

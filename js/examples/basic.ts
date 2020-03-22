@@ -77,7 +77,6 @@ function main() {
     console.error("Did not return correct number of prefixes for 'c'");
   }
 
-  /*
   /// Super strings
   console.log("Finding superstrings of: 'w'");
   const nodesSuperStringOfW = seaDawg.findWithSubstring("w");
@@ -89,11 +88,9 @@ function main() {
   console.log("Finding superstrings of: 'c'");
   const nodesSuperStringOfc = seaDawg.findWithSubstring("c");
 
-  console.log(nodesWithPrefixOfc);
-  if(nodesSuperStringOfc.length !== 6) {
+  if(nodesSuperStringOfc.length !== 7) {
     console.error("Did not return correct number of super strings for 'c'");
   }
-  */
 }
 
 main();
