@@ -1,3 +1,5 @@
+import {dump} from "dumpenvy";
+
 import { SeaDawgCore } from "../src/core";
 import { SeaValueSinkNode } from "../src/data";
 
@@ -90,6 +92,35 @@ function main() {
 
   if(nodesSuperStringOfc.length !== 7) {
     console.error("Did not return correct number of super strings for 'c'");
+  }
+
+  console.log("Removing `cocoa`");
+  seaDawg.delete("cocoa");
+  const afterCocoaDeletedValue = seaDawg.findExact("cocoa");
+
+  if(afterCocoaDeletedValue) {
+    console.error("Cocoa still exists");
+  }
+
+  console.log("Adding cocoa again");
+
+  seaDawg.add("cocoa", new SeaValueSinkNode("cocoa"));
+
+  const afterCocoaAddedValue = seaDawg.findExact("cocoa");
+
+  if(!afterCocoaAddedValue) {
+    console.error("Cocoa doesn't exist after re-adding.");
+  }
+
+  console.log("Removing all words")
+  for(const word of words) {
+    
+    seaDawg.delete(word);
+  }
+
+  if(seaDawg.source.toEdges.size !== 0) {
+
+    console.error("Graph is not empty after all words removed");
   }
 }
 

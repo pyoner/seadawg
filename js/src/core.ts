@@ -72,6 +72,20 @@ export class SeaNode {
     }
   }
 
+  removeEdge(letter: string): SeaEdge {
+    
+    const existingEdge = this.toEdges.get(letter);
+
+    if(existingEdge === null) {
+      return null;
+    }
+
+    this.toEdges.delete(letter);
+    existingEdge.dest.incomingEdges.delete(existingEdge);
+
+    return existingEdge;
+  }
+
   clone(): SeaNode {
 
     const cloneNode = new SeaNode(this.length, this.suffix);
@@ -137,7 +151,77 @@ export class SeaDawgCore {
       updateData = this._update(word, letter, updateData[0], updateData[1], wordIdx);
     }
 
-    return this.sink;
+    this.sink = null;
+
+    return sink;
+  }
+
+  // Deletes word from graph if it exists (returns true) otherwise returns false
+  public delete(word: string): boolean {
+
+    const sinkNode = this.findExact(word);
+
+    if(!sinkNode) {
+      return false;
+    }
+
+    const edges = Array.from(sinkNode.incomingEdges);
+
+    this._cleanup(edges);
+    
+    // I suspect I need to visit all parents and remove their edges. Removing an edge should
+    // decrease the node lengths by 1.
+
+    // Any edge with a length of 1 move be removed in order to preseve the property of a CDAWG
+  }
+
+  private _cleanup(edges: SeaEdge[]) {
+
+    for (const edge of edges) {
+
+      edge.src.removeEdge(edge.partial[0]);
+    }
+
+    //TODO need to backtrack through each edge to find edges to merge
+    for (const edge of edges) {
+
+      const srcNode = edge.src;
+
+      if(srcNode.length <= 0) {
+        continue;
+      }
+
+      const srcNodeOutDegree = srcNode.toEdges.size;
+      if(srcNodeOutDegree == 1) {
+        const dest = Array.from(srcNode.toEdges.values())[0];
+
+        this._mergeEdge(srcNode, dest);
+        srcNode.removeEdge(dest.partial[0]);
+      } else if (srcNodeOutDegree == 0) {
+
+        this._cleanup(Array.from(srcNode.incomingEdges));
+      }
+    }
+  }
+
+  private _mergeEdge(srcNode: SeaNode, destEdge: SeaEdge) {
+
+    const incomingEdges = Array.from(srcNode.incomingEdges);
+
+    if (destEdge.dest instanceof SeaNode) {
+      destEdge.dest.length += destEdge.partial.length;
+    }
+
+    for(const incomingEdge of incomingEdges) {
+
+      incomingEdge.src.setEdge(
+        incomingEdge.partial + destEdge.partial,
+        incomingEdge.partial[0],
+        incomingEdge.startIdx,
+        incomingEdge.endIdx + destEdge.partial.length,
+        destEdge.dest,
+      );
+    }
   }
 
   public findExact(word: string): SeaSinkNode {
@@ -224,6 +308,7 @@ export class SeaDawgCore {
     return result;
   }
 
+  // Traversals are executed in an iterative manner rather than recursion.
   private _executeTraversal(
     traverser: Traverser,
     baseContext: TraversalContext,
@@ -650,13 +735,12 @@ class FindSuperStringTraverser implements Traverser {
     traversalContexts.push(proposedContext);
   }
 
-  // This function never returns true because the initial foreard edge selection process is done once
+  // This function never returns true because the initial forward edge selection process is done once
   // since we will have a sufficient suffix. that prunes the search space.
   // The idea is to then traverse to the sink.
   // Once we have a sink, then initiate collection.
   shouldAcceptEdge(matchingEdge: SeaEdge, context: FindSuperStringContext, traversalContexts: Array<TraversalContext>): boolean {
     const wordIdx = context.wordIdx;
-    const word = this._substringWord;
     const partialLength = matchingEdge.partial.length;
 
     if(
