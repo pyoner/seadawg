@@ -118,7 +118,7 @@ function main() {
     seaDawg.delete(word);
   }
 
-  if(seaDawg.source.toEdges.size !== 0) {
+  if(seaDawg.size !== 0) {
 
     console.error("Graph is not empty after all words removed");
   }

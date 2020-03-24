@@ -112,11 +112,12 @@ export class SeaDawgCore {
   // Any string in the Suffix(S') is represented by a path starting at the initial node and ending at the final node
   // Suppose that a path spelling out α∈Σ∗ ends at a node v. If a string β is always preceded by γ∈Σ∗ and α=γβ in any string x ∈ S′ such that β ∈ Factor(x), the path spelling out β also ends at node v.
 
-  root: SeaNode;
-  sink: SeaSinkNode;
-  source: SeaNode;
-  debug: boolean = false;
-  wordTerminator: string = "\u0000";
+  private root: SeaNode;
+  private sink: SeaSinkNode;
+  private source: SeaNode;
+  private debug: boolean = false;
+  private wordTerminator: string = "\u0000";
+  private _size: number = 0;
 
   constructor() {
 
@@ -125,6 +126,10 @@ export class SeaDawgCore {
 
     this.source = new SeaNode(0, this.root);
     (<any>this.source).id = "source";
+  }
+  
+  public get size(): number {
+    return this._size;
   }
 
   public add(word: string, sink: SeaSinkNode) {
@@ -151,13 +156,14 @@ export class SeaDawgCore {
       updateData = this._update(word, letter, updateData[0], updateData[1], wordIdx);
     }
 
+    this._size++;
     this.sink = null;
 
     return sink;
   }
 
   // Deletes word from graph if it exists (returns true) otherwise returns false.
-  // Warning: Experimental, it is not proven to be the inverse operation. If it can be proven that delete(w2, CDAWG([w1, w2, ..., wx])) = add(w1, CDAWG([w3, ..., wx])) for all casesm then this will no longer be experimental.
+  // Warning: Experimental, it is not proven to be the inverse operation. If it can be proven that delete(w2, CDAWG([w1, w2, ..., wx])) = add(w1, CDAWG([w3, ..., wx])) for all cases then this will no longer be experimental.
   // Remark 1: Have not seen any literature around deletion of words in a CDAWG, so that means have to be creative and accept some cost. Don't do deletions if a true CDAWG is required.
   // Remark 2: Not claiming that the graph is in a minimal form after deletion, but that the
   // word we added can no longer be reached. A best attempt at minimization will be performed.
@@ -171,11 +177,12 @@ export class SeaDawgCore {
 
     const edges = Array.from(sinkNode.incomingEdges);
 
+    this._size--;
     this._cleanup(edges);
   }
 
   // Removes specified edges and any merges or removes any source nodes that are no longer needed
-  // recursively
+  // recursively.
   private _cleanup(edges: SeaEdge[]) {
 
     for (const edge of edges) {
@@ -208,6 +215,9 @@ export class SeaDawgCore {
 
     const incomingEdges = Array.from(srcNode.incomingEdges);
 
+    //TODO: I am concerned about the suffix link, I should make sure to copy it to each edges src nodes
+    // but if src nodes have their own suffix link then there would be conflict. It makes me think
+    // that nodes in general should live up until they have zero outgoing edges only rather than merge.
     if (destEdge.dest instanceof SeaNode) {
       destEdge.dest.length += destEdge.partial.length;
     }
