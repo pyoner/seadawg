@@ -168,13 +168,10 @@ export class SeaDawgCore {
     const edges = Array.from(sinkNode.incomingEdges);
 
     this._cleanup(edges);
-    
-    // I suspect I need to visit all parents and remove their edges. Removing an edge should
-    // decrease the node lengths by 1.
-
-    // Any edge with a length of 1 move be removed in order to preseve the property of a CDAWG
   }
 
+  // Removes specified edges and any merges or removes any source nodes that are no longer needed
+  // recursively
   private _cleanup(edges: SeaEdge[]) {
 
     for (const edge of edges) {
