@@ -179,7 +179,6 @@ export class SeaDawgCore {
       edge.src.removeEdge(edge.partial[0]);
     }
 
-    //TODO need to backtrack through each edge to find edges to merge
     for (const edge of edges) {
 
       const srcNode = edge.src;
