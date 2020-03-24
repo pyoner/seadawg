@@ -156,7 +156,11 @@ export class SeaDawgCore {
     return sink;
   }
 
-  // Deletes word from graph if it exists (returns true) otherwise returns false
+  // Deletes word from graph if it exists (returns true) otherwise returns false.
+  // Warning: Experimental. If it can be proven that delete(CDAWG([w1, w2]), w2) = add(w1, CDAWG([])) for all casesm then this will no longer be experimental.
+  // Remark 1: Have not seen any literature around deletion of words in a CDAWG, so that means have to be creative and accept some cost. Don't do deletions if a true CDAWG is required.
+  // Remark 2: Not claiming that the graph is in a minimal form after deletion, but that the
+  // word we added can no longer be reached. A best attempt at minimization will be performed.
   public delete(word: string): boolean {
 
     const sinkNode = this.findExact(word);
