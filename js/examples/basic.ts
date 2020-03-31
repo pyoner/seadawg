@@ -79,6 +79,13 @@ function main() {
     console.error("Did not return correct number of prefixes for 'c'");
   }
 
+  console.log("Finding prefixed nodes of: 'co'");
+  const nodesWithPrefixOfco = seaDawg.findWithPrefix("co");
+
+  if(nodesWithPrefixOfco.length !== 3) {
+    console.error("Did not return correct number of prefixes for 'co'");
+  }
+
   /// Super strings
   console.log("Finding superstrings of: 'w'");
   const nodesSuperStringOfW = seaDawg.findWithSubstring("w");
